@@ -5,8 +5,19 @@ Author: liuhh02 https://medium.com/@liuhh02
 """
 
 import logging
+import json
+from datetime import datetime
 from telegram.ext import Updater, CommandHandler, MessageHandler, Filters
 import os
+from telegram import (
+    Poll,
+    ParseMode,
+    KeyboardButton,
+    KeyboardButtonPollType,
+    ReplyKeyboardMarkup,
+    ReplyKeyboardRemove,
+    Update,
+)
 PORT = int(os.environ.get('PORT', 5000))
 
 
@@ -16,12 +27,26 @@ logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s
 
 logger = logging.getLogger(__name__)
 TOKEN = os.environ["TOKEN"]
+ACCESS_KEY = os.environ["ACCESS_KEY"]
+
+URA_TOKEN = ""
+
+# Define external API request handlers
+def fetch_ura_token():
+
 
 # Define a few command handlers. These usually take the two arguments update and
 # context. Error handlers also receive the raised TelegramError object in error.
+start_reply_keyboard = [
+    ['Age', 'Favourite colour'],
+    ['Number of siblings', 'Something else...'],
+    ['Done'],
+]
+start_keyboard_markup = ReplyKeyboardMarkup(reply_keyboard, one_time_keyboard=True)
 def start(update, context):
     """Send a message when the command /start is issued."""
-    update.message.reply_text('Hi!')
+    update.message.reply_text('Hello! To search for nearby parking, type in a location or send me your current location.')
+    print(str(context.user_data))
 
 def help(update, context):
     """Send a message when the command /help is issued."""
