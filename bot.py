@@ -390,7 +390,7 @@ def inputLocation(update: Update, context: CallbackContext) -> int:
 
 # fallback handler for unexpected user input
 def fallback(update: Update, context: CallbackContext) -> int:
-  replyText(update, "I don't accept this input format. Send me your current location, or type in an address or postal code!")
+  replyText(update, "Send me your current location, or type in an address or postal code!")
   return CHOOSING
 
 def startPrompt(update: Update, context: CallbackContext) -> int:
