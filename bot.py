@@ -2,7 +2,7 @@
 Reference: https://github.com/python-telegram-bot/python-telegram-bot/blob/master/examples/persistentconversationbot.py
 """
 
-from lib2to3.pytree import convert
+from typing import Tuple
 import logging
 import requests
 import json
@@ -23,6 +23,7 @@ from telegram.ext import (
     ConversationHandler,
     # PicklePersistence,
     CallbackContext,
+    CallbackQueryHandler
 )
 import pymongo
 from svy21 import SVY21
@@ -152,7 +153,12 @@ Sun PH Min: {sunMin} mins
 Sun PH Rate: {sunRate}
 """
 
-# ====== External API integration ======
+# ====== methods for external API integration ======
+GOOGLEMAPS_URL = {
+  "LATLON_FORMAT": "https://www.google.com/maps/place/{lat},{lon}",
+  "ADDRESS_FORMAT": "https://www.google.com/maps/place/{address}"
+}
+
 URA_API = {
   "FETCH_TOKEN": "https://www.ura.gov.sg/uraDataService/insertNewToken.action"
 }
@@ -178,7 +184,6 @@ def fetchUraToken():
 
     return token
   return ura_token
-
 
 ONEMAP_API = {
   "SEARCH": "https://developers.onemap.sg/commonapi/search?searchVal={searchVal}&returnGeom=Y&getAddrDetails=Y&pageNum=1",
@@ -224,8 +229,6 @@ def convertStrToFloat(num: str) -> float:
   except:
     logger.error("convertStrToFloat: Conversion to float error | Input: %s", num)
     raise TelegramError(f"Conversion to float error occured for {num}")
-  
-  
 
 # calculate the straight line distance between two X,Y coordinates (SYV21)
 def calculateDistanceXY(x1: float, y1: float, x2: float, y2: float) -> float:
@@ -234,9 +237,18 @@ def calculateDistanceXY(x1: float, y1: float, x2: float, y2: float) -> float:
   distance = (first + second) ** (0.5)
   return round(distance, 2)
 
-def fetchCarparkInformation(x: str, y: str) -> str:
+# filters for available parking based on the given x y coordinate, and according to the settings (CARPARK_RANGE, CARPARK_LIMIT)
+def filterForCarparks(x: str, y: str) -> str:
   xFloat, yFloat = convertStrToFloat(x), convertStrToFloat(y)
-  nearbyCarparks = [(carpark, calculateDistanceXY(xFloat, yFloat, carpark['x_coord'], carpark['y_coord'])) for carpark in carparkData if calculateDistanceXY(xFloat, yFloat, carpark['x_coord'], carpark['y_coord']) <= CARPARK_RANGE]
+  # nearbyCarparks = [(carpark, calculateDistanceXY(xFloat, yFloat, carpark['x_coord'], carpark['y_coord'])) for carpark in carparkData if calculateDistanceXY(xFloat, yFloat, carpark['x_coord'], carpark['y_coord']) <= CARPARK_RANGE]
+  
+  nearbyCarparks = []
+  
+  for carpark in carparkData:
+    distance = calculateDistanceXY(xFloat, yFloat, carpark['x_coord'], carpark['y_coord'])
+    if distance <= CARPARK_RANGE:
+      carpark['distance'] = distance
+      nearbyCarparks.append(carpark)
   
   if len(nearbyCarparks) > 1:
     nearbyCarparks.sort(key=lambda x: x[1])
@@ -246,10 +258,45 @@ def fetchCarparkInformation(x: str, y: str) -> str:
       
   return nearbyCarparks
 
+class Pagination:
+  def __init__(self, lst):
+    self.lst = lst
+    self.currIndex = 0
+    
+  def getPage(self, index: int) -> Tuple[str, InlineKeyboardMarkup]:
+    carpark = self.lst[index]
+    buttons = []
+    # has previous page
+    if index > 0:
+      buttons.append([InlineKeyboardButton(text="< ", callback_data=self.getPage(index - 1))])
+    buttons.append([InlineKeyboardButton(text="Open in Google Maps", url=GOOGLEMAPS_URL['LATLON_FORMAT'].format(lat=carpark['lat'], lon=carpark['lon']))])
+    # has next page
+    if index < len(self.lst) - 1:
+      buttons.append([InlineKeyboardButton(text="< ", callback_data=self.getPage(index + 1))])
+    return self.formatPageText(carpark), InlineKeyboardMarkup(buttons)
+  
+  # formats individual carpark information and how it is displayed
+  def formatPageText(self, carparkInfo: dict) -> str:
+    return CARPARK_FORMAT.format(name=carparkInfo.get('address'), distance=carparkInfo['distance'], availableLots="NIL", lotType="NIL", weekdayTime="NIL", weekdayRate="NIL", satDayMin="NIL", satDayRate="NIL", sunMin="NIL", sunRate="NIL")
+  
+# creates a Pagination object which consolidates the available parking to into one message for the user
+def processCarparkInfo(carparkInfo: list) -> Pagination:
+  for carpark, _ in carparkInfo:
+    lat, lon = coordConverter.computeLatLon(carpark['x_coord'], carpark['y_coord'])
+    carpark['lat'] = lat
+    carpark['lon'] = lon
 
-def formatCarparkInformation(carparkInfo: dict, distance: float) -> str:
-  return CARPARK_FORMAT.format(name=carparkInfo.get('address'), distance=distance, availableLots="NIL", lotType="NIL", weekdayTime="NIL", weekdayRate="NIL", satDayMin="NIL", satDayRate="NIL", sunMin="NIL", sunRate="NIL")
+  return Pagination(carparkInfo)
+    
+# ====== Telegram Markup Keyboards ======
+# keyboard buttons
+share_current_location_btn = [KeyboardButton(text="Share Current Location", request_location=True)]
+# continue_prev_search_btn = [KeyboardButton(text="Continue With Previous Search")]
+# use_saved_location = [KeyboardButton(text="Use a Saved Location")]
 
+# keyboards
+# most often used keyboard that includes the share location button
+keyboard1 = ReplyKeyboardMarkup([share_current_location_btn], one_time_keyboard=True, input_field_placeholder="Type an address or postal code...")
 
 # ====== Telegram Bot Utility Functions ======
 # reply the given message with text and optional keyboard
@@ -260,25 +307,28 @@ def replyText(update: Update, text: str, keyboard: ReplyKeyboardMarkup = None):
 def replyVenue(update: Update, text: str, lat: str, lon: str, address: str = None, keyboard: ReplyKeyboardMarkup = None):
   update.message.reply_venue(latitude=lat, longitude=lon, title=text, address=address)
 
-GOOGLEMAPS_URL = {
-  "LATLON_FORMAT": "https://www.google.com/maps/place/{lat},{lon}",
-  "ADDRESS_FORMAT": "https://www.google.com/maps/place/{address}"
-}
-def replyWithCarparkInfo(update: Update, carparkInfo: list):
-  for carpark, distance in carparkInfo:
-    lat, lon = coordConverter.computeLatLon(carpark['x_coord'], carpark['y_coord'])
-    inlineKeyboard = InlineKeyboardMarkup([[InlineKeyboardButton(text="Open in Google Maps", url=GOOGLEMAPS_URL['LATLON_FORMAT'].format(lat=lat, lon=lon))]])
-    replyText(update, formatCarparkInformation(carpark, distance), inlineKeyboard)
-  return
-  
-# ====== Telegram Markup Keyboards ======
-# keyboard buttons
-share_current_location_btn = [KeyboardButton(text="Share Current Location", request_location=True)]
-continue_prev_search_btn = [KeyboardButton(text="Continue With Previous Search")]
-use_saved_location = [KeyboardButton(text="Use a Saved Location")]
+# called when user clicks on an inlinekeyboard button to go through the listed available parking
+def pageCallback(update: Update, context: CallbackContext) -> None:
+    """Parses the CallbackQuery and updates the message text."""
+    query = update.callback_query
 
-# keyboards
-keyboard1 = ReplyKeyboardMarkup([share_current_location_btn], one_time_keyboard=True, input_field_placeholder="Type an address or postal code...")
+    # CallbackQueries need to be answered, even if no notification to the user is needed
+    # Some clients may have trouble otherwise. See https://core.telegram.org/bots/api#callbackquery
+    query.answer()
+
+    query.edit_message_text(text=f"Selected option: {query.data}")
+    
+
+# reply the user with all the nearby carparks
+def replyWithCarparkInfo(update: Update, context: CallbackContext, carparkInfo: list):
+  pagination = processCarparkInfo(carparkInfo)
+  # context['']
+  text, inlineKeyboard = pagination.getPage(0)
+  # for carpark, distance in carparkInfo:
+  #   lat, lon = coordConverter.computeLatLon(carpark['x_coord'], carpark['y_coord'])
+  #   inlineKeyboard = InlineKeyboardMarkup([[InlineKeyboardButton(text="Open in Google Maps", url=GOOGLEMAPS_URL['LATLON_FORMAT'].format(lat=lat, lon=lon))]])
+  #   replyText(update, formatIndividualCarparkInfo(carpark, distance), inlineKeyboard)
+  return replyText(update, text, inlineKeyboard)
 
 # ====== Telegram Message Handlers ======
 # error handler
@@ -317,12 +367,12 @@ def inputText(update: Update, context: CallbackContext) -> int:
   replyText(update, LOOKING_FOR_ADDRESS.format(addr=addr))
   
   # retrieve and display carpark information
-  res = fetchCarparkInformation(r.get('X'), r.get('Y'))
+  res = filterForCarparks(r.get('X'), r.get('Y'))
   if len(res) == 0:
     replyText(update, NO_AVAILABLE_PARKING)
     return CHOOSING
   
-  replyWithCarparkInfo(update, res)
+  replyWithCarparkInfo(update, context, res)
   
   return ConversationHandler.END
 
@@ -355,12 +405,12 @@ def inputPostalCode(update: Update, context: CallbackContext) -> int:
   replyText(update, LOOKING_FOR_ADDRESS.format(addr=addr))
   
   # retrieve and display carpark information
-  res = fetchCarparkInformation(r.get('X'), r.get('Y'))
+  res = filterForCarparks(r.get('X'), r.get('Y'))
   if len(res) == 0:
     replyText(update, NO_AVAILABLE_PARKING)
     return CHOOSING
   
-  replyWithCarparkInfo(update, res)
+  replyWithCarparkInfo(update, context, res)
   return ConversationHandler.END
 
 def inputLocation(update: Update, context: CallbackContext) -> int:
@@ -380,12 +430,12 @@ def inputLocation(update: Update, context: CallbackContext) -> int:
 
 
   # retrieve and display carpark information
-  res = fetchCarparkInformation(r.get('XCOORD'), r.get('YCOORD'))
+  res = filterForCarparks(r.get('XCOORD'), r.get('YCOORD'))
   if len(res) == 0:
     replyText(update, NO_AVAILABLE_PARKING)
     return CHOOSING
   
-  replyWithCarparkInfo(update, res)
+  replyWithCarparkInfo(update, context, res)
   return ConversationHandler.END
 
 # fallback handler for unexpected user input
@@ -435,10 +485,13 @@ def main():
       name="conversation",
       # persistent=True,
   )
-  
-  
+
 
   dispatcher.add_handler(conv_handler)
+
+  dispatcher.add_handler(CallbackQueryHandler(pageCallback))
+  
+  
 
   # show_data_handler = CommandHandler('show_data', show_data)
   # dispatcher.add_handler(show_data_handler)
@@ -446,13 +499,13 @@ def main():
   # log all errors
   # dispatcher.add_error_handler(error)
 
-  # Start the Bot
+  # Start the Bot (USE THIS FOR DEPLOYMENT)
   updater.start_webhook(listen="0.0.0.0",
                         port=int(PORT),
                         url_path=TOKEN)
   updater.bot.setWebhook('https://noelle-carpark-bot.herokuapp.com/' + TOKEN)
 
-  # # Start the Bot
+  # # Start the Bot (USE THIS IF RUNNING LOCALLY)
   # updater.start_polling()
   
   logger.info("Bot started ♥")
