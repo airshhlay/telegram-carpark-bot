@@ -3,13 +3,14 @@ Reference: https://github.com/python-telegram-bot/python-telegram-bot/blob/maste
 """
 
 from typing import Tuple
+import time
 import logging
 import requests
 import json
 import json
 import re
-import signal
-import sys
+# import signal
+# import sys
 from datetime import date, datetime
 from math import radians, cos, sin, asin, sqrt
 import os
@@ -31,7 +32,7 @@ from svy21 import SVY21
 PORT = int(os.environ.get("PORT", 5000))
 coordConverter = SVY21()
 # tokens and access keys
-TOKEN, URA_ACCESS_KEY, MY_TRANSPORT_ACCESS_KEY, ONEMAP_TOKEN = None, None, None, None
+TOKEN, URA_ACCESS_KEY, MY_TRANSPORT_ACCESS_KEY, ONEMAP = None, None, None, {}
 
 # database
 db = None
@@ -49,78 +50,6 @@ carparkData = None
 # logger
 logger = None
 
-# ====== Basic setup ======
-
-def connectToDatabase() -> pymongo.collection.Collection:
-  client = pymongo.MongoClient(MONGO_CONNECTION_STR.format(mongoUser=MONGO_USERNAME, mongoPwd=MONGO_PWD, databaseName=DATABASE_NAME))
-  return client[DATABASE_NAME]
-
-
-def setup():
-  global db, logger, carparkData, TOKEN, URA_ACCESS_KEY, MY_TRANSPORT_ACCESS_KEY, ONEMAP_TOKEN
-  # enable logging
-  logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-                    level=logging.INFO)
-  logger = logging.getLogger(__name__)
-    
-  # connect to database and retrieve collections
-  db = connectToDatabase()
-
-  if db == None:
-    logger.error("Setup error: Unable to connect to database")
-    return False
-  logger.info("Setup: Connected to db")
-  botCollection = db[BOT_COLLECTION]
-  if botCollection == None:
-    logger.error("Setup error: bot collection not found")
-    return False
-  dataCollection = db[CARPARK_COLLECTION]
-  if dataCollection == None:
-    logger.error("Setup error: data collection not found")
-    return False
-  
-  # load carpark data
-  carparkDataDoc = botCollection.find_one({'name': 'carparkData'})
-  if not carparkDataDoc or not carparkDataDoc.get('data'):
-    logger.error("Setup error: No carpark data information in db")
-    return False
-  carparkData = carparkDataDoc.get('data')
-  
-  # retrieve secrets from database
-  telegramBotDoc = botCollection.find_one({'name': 'telegramBot'})
-  if not telegramBotDoc or not telegramBotDoc.get('token'):
-    logger.error("Setup error: No telegrambot information in db")
-    return False
-  TOKEN = telegramBotDoc.get('token')
-  
-  uraDoc = botCollection.find_one({'name': 'ura'})
-  if not uraDoc or not uraDoc.get('accessKey'):
-    logger.error("Setup error: No ura information in db")
-    return False
-  URA_ACCESS_KEY = uraDoc.get('accessKey')
-  
-  oneMap = botCollection.find_one({'name': 'oneMap'})
-  if not oneMap or not oneMap.get('token'):
-    logger.error("Setup error: No oneMap information in db")
-    return False
-  ONEMAP_TOKEN = oneMap.get('token')
- 
-  myTransport = botCollection.find_one({'name': 'myTransport'})
-  if not myTransport or not myTransport.get('accountKey'):
-    logger.error("Setup error: No myTransport information in db")
-    return False
-  MY_TRANSPORT_ACCESS_KEY = myTransport.get('accountKey')
-  
-  logger.info("Setup: Retrieved information from db")
-  logger.info(f"token: {TOKEN}\nura access: {URA_ACCESS_KEY}\nonemap: {ONEMAP_TOKEN}\nmyTransport: {MY_TRANSPORT_ACCESS_KEY}")
-
-  return True
-    
-# def addField():
-#   with open('hdb-carpark-information.json', 'r') as f:
-#     data = json.load(f)
-#     doc = db[BOT_COLLECTION].find_one({'name': 'carparkData'})
-#     db[BOT_COLLECTION].update_one({'_id': doc['_id']}, {'$set': {'data': data}})
 
 # ======= CONSTANTS USED FOR MESSAGING =====
 CHOOSING, INFO_SENT, ADDITIONAL = range(3)
@@ -187,8 +116,18 @@ def fetchUraToken():
 
 ONEMAP_API = {
   "SEARCH": "https://developers.onemap.sg/commonapi/search?searchVal={searchVal}&returnGeom=Y&getAddrDetails=Y&pageNum=1",
-  "REVERSE_GEOCODE": "https://developers.onemap.sg/privateapi/commonsvc/revgeocode?location={x},{y}&token={token}&addressType=all"
+  "REVERSE_GEOCODE": "https://developers.onemap.sg/privateapi/commonsvc/revgeocode?location={x},{y}&token={token}&addressType=all",
+  "GET_TOKEN": "https://developers.onemap.sg/privateapi/auth/post/getToken"
 }
+def fetchOneMapToken() -> Tuple[str, str]:
+  body = {'email': ONEMAP['email'], 'password': ONEMAP['password']}
+  r = doPostRequest(ONEMAP_API['GET_TOKEN'], body)
+  if r.get('access_token') and r.get('expiry_timestamp'):
+    return r.get('access_token'), r.get('expiry_timestamp')
+  else:
+    logger.error("No token found for OneMap. Exiting....")
+    raise Exception()
+  
 def fetchLocationDataFromAddr(addr: str) -> dict:
   url = ONEMAP_API['SEARCH'].format(searchVal=addr)
   r = doGetRequest(url)
@@ -199,7 +138,7 @@ def fetchLocationDataFromAddr(addr: str) -> dict:
   return None
 
 def fetchLocationDataFromCoord(x: str, y: str) -> dict:
-  url = ONEMAP_API['REVERSE_GEOCODE'].format(x=x, y=y, token=ONEMAP_TOKEN)
+  url = ONEMAP_API['REVERSE_GEOCODE'].format(x=x, y=y, token=ONEMAP['token'])
   r = doGetRequest(url)
   if r and r.get('GeocodeInfo') and len(r.get('GeocodeInfo')) > 0:
     return r.get('GeocodeInfo')[0]
@@ -208,8 +147,27 @@ def fetchLocationDataFromCoord(x: str, y: str) -> dict:
 
 # generic method to make a get request to specified url
 # returns the response, or None if error occurs
-def doGetRequest(url, headers=None) -> dict:
-  r = requests.get(url, headers=headers, timeout=5)
+def doGetRequest(url, headers={'Accept':'application/json'}) -> dict:
+  r = requests.get(url, headers=headers, timeout=10)
+  try:
+    if r.status_code == 200:
+      r = r.json()
+      logger.info("Url: %s, Response: %s", url, str(r))
+      return r
+    else:
+      r = r.json()
+      logger.error("Url: %s, Response: %s", url, str(r))
+  except requests.exceptions.Timeout as err:
+    logger.error("Request to %s timed out", url)
+  except (requests.exceptions.ConnectionError, requests.exceptions.JSONDecodeError):
+    logger.info("connection error, retrying")
+    # retry once
+    time.sleep(3)
+    return doGetRequest(url, headers)
+  return None
+    
+def doPostRequest(url, body=None, headers=None) -> dict:
+  r = requests.post(url, data=body, headers=headers, timeout=10)
   try:
     if r.status_code == 200:
       r = r.json()
@@ -251,7 +209,7 @@ def filterForCarparks(x: str, y: str) -> str:
       nearbyCarparks.append(carpark)
   
   if len(nearbyCarparks) > 1:
-    nearbyCarparks.sort(key=lambda x: x[1])
+    nearbyCarparks.sort(key=lambda x: x['distance'])
     
   if len(nearbyCarparks) > CARPARK_LIMIT:
       nearbyCarparks =  nearbyCarparks[:CARPARK_LIMIT]
@@ -259,21 +217,26 @@ def filterForCarparks(x: str, y: str) -> str:
   return nearbyCarparks
 
 class Pagination:
-  def __init__(self, lst):
+  def __init__(self, lst, messageId):
     self.lst = lst
-    self.currIndex = 0
+    self.messageId = messageId
+    self.index = 0
     
   def getPage(self, index: int) -> Tuple[str, InlineKeyboardMarkup]:
     carpark = self.lst[index]
     buttons = []
     # has previous page
     if index > 0:
-      buttons.append([InlineKeyboardButton(text="< ", callback_data=self.getPage(index - 1))])
-    buttons.append([InlineKeyboardButton(text="Open in Google Maps", url=GOOGLEMAPS_URL['LATLON_FORMAT'].format(lat=carpark['lat'], lon=carpark['lon']))])
+      buttons.append([InlineKeyboardButton(text="< prev", callback_data=f"{self.messageId},{index - 1}")])
+  
     # has next page
     if index < len(self.lst) - 1:
-      buttons.append([InlineKeyboardButton(text="< ", callback_data=self.getPage(index + 1))])
+      buttons.append([InlineKeyboardButton(text="next >", callback_data=(f"{self.messageId},{index + 1}"))])
+      
+    # add google maps button
+    buttons.append([InlineKeyboardButton(text="Open in Google Maps", url=GOOGLEMAPS_URL['LATLON_FORMAT'].format(lat=carpark['lat'], lon=carpark['lon']))])
     return self.formatPageText(carpark), InlineKeyboardMarkup(buttons)
+  
   
   # formats individual carpark information and how it is displayed
   def formatPageText(self, carparkInfo: dict) -> str:
@@ -281,12 +244,12 @@ class Pagination:
   
 # creates a Pagination object which consolidates the available parking to into one message for the user
 def processCarparkInfo(carparkInfo: list) -> Pagination:
-  for carpark, _ in carparkInfo:
+  for carpark in carparkInfo:
     lat, lon = coordConverter.computeLatLon(carpark['x_coord'], carpark['y_coord'])
     carpark['lat'] = lat
     carpark['lon'] = lon
 
-  return Pagination(carparkInfo)
+  return carparkInfo
     
 # ====== Telegram Markup Keyboards ======
 # keyboard buttons
@@ -301,29 +264,35 @@ keyboard1 = ReplyKeyboardMarkup([share_current_location_btn], one_time_keyboard=
 # ====== Telegram Bot Utility Functions ======
 # reply the given message with text and optional keyboard
 def replyText(update: Update, text: str, keyboard: ReplyKeyboardMarkup = None):
-  update.message.reply_text(text, reply_markup=keyboard, parse_mode=ParseMode.HTML)
-
+  return update.message.reply_text(text, reply_markup=keyboard, parse_mode=ParseMode.HTML)
+  
 # reply the given message with a venue and optional keyboard (?)
 def replyVenue(update: Update, text: str, lat: str, lon: str, address: str = None, keyboard: ReplyKeyboardMarkup = None):
   update.message.reply_venue(latitude=lat, longitude=lon, title=text, address=address)
 
 # called when user clicks on an inlinekeyboard button to go through the listed available parking
-def pageCallback(update: Update, context: CallbackContext) -> None:
+def changePage(update: Update, context: CallbackContext) -> None:
     """Parses the CallbackQuery and updates the message text."""
     query = update.callback_query
-
+    data = context.user_data
+    
+    split = query.data.split(',')
+    messageId, index = int(split[0]), int(split[1])
+    
+    # TODO: add fallback if pagination not found in data
+    pagination = data.get(messageId)
+    text, keyboard = pagination.getPage(index)
+    
+    query.edit_message_text(text=text, reply_markup=keyboard, parse_mode=ParseMode.HTML)
     # CallbackQueries need to be answered, even if no notification to the user is needed
     # Some clients may have trouble otherwise. See https://core.telegram.org/bots/api#callbackquery
     query.answer()
 
-    query.edit_message_text(text=f"Selected option: {query.data}")
-    
-
 # reply the user with all the nearby carparks
 def replyWithCarparkInfo(update: Update, context: CallbackContext, carparkInfo: list):
-  pagination = processCarparkInfo(carparkInfo)
-  # context['']
+  pagination = Pagination(processCarparkInfo(carparkInfo), update.message.message_id)
   text, inlineKeyboard = pagination.getPage(0)
+  context.user_data[update.message.message_id] = pagination
   # for carpark, distance in carparkInfo:
   #   lat, lon = coordConverter.computeLatLon(carpark['x_coord'], carpark['y_coord'])
   #   inlineKeyboard = InlineKeyboardMarkup([[InlineKeyboardButton(text="Open in Google Maps", url=GOOGLEMAPS_URL['LATLON_FORMAT'].format(lat=lat, lon=lon))]])
@@ -350,7 +319,12 @@ def start(update: Update, context: CallbackContext) -> int:
 def inputText(update: Update, context: CallbackContext) -> int:
   # remove leading and trailing whitespace
   user_input = update.message.text.strip()
-  replyText(update, ADDRESS_RECEIVED)
+  
+  if (len(user_input)) < 3:
+    replyText(update, INVALID_ADDRESS)
+    return
+
+  msg = replyText(update, ADDRESS_RECEIVED)
   
   r = fetchLocationDataFromAddr(user_input)
   
@@ -364,7 +338,8 @@ def inputText(update: Update, context: CallbackContext) -> int:
     addr = r.get('ADDRESS')
 
   # inform user of search for resolved address
-  replyText(update, LOOKING_FOR_ADDRESS.format(addr=addr))
+  # replyText(update, LOOKING_FOR_ADDRESS.format(addr=addr))
+  context.bot.edit_message_text(text=LOOKING_FOR_ADDRESS.format(addr=addr), chat_id=update.message.chat_id, message_id=msg.message_id)
   
   # retrieve and display carpark information
   res = filterForCarparks(r.get('X'), r.get('Y'))
@@ -389,7 +364,7 @@ def inputPostalCode(update: Update, context: CallbackContext) -> int:
     replyText(update, INVALID_POSTAL_CODE, keyboard1)
     return CHOOSING
   
-  replyText(update, POSTAL_CODE_RECEIVED)
+  msg = replyText(update, POSTAL_CODE_RECEIVED)
   r = fetchLocationDataFromAddr(user_input)
   
   if not r or not (r.get('X') and r.get('Y')):
@@ -402,7 +377,8 @@ def inputPostalCode(update: Update, context: CallbackContext) -> int:
     addr = r.get('ADDRESS')
 
   # inform user of search for resolved address
-  replyText(update, LOOKING_FOR_ADDRESS.format(addr=addr))
+  # replyText(update, LOOKING_FOR_ADDRESS.format(addr=addr))
+  context.bot.edit_message_text(text=LOOKING_FOR_ADDRESS.format(addr=addr), chat_id=update.message.chat_id, message_id=msg.message_id)
   
   # retrieve and display carpark information
   res = filterForCarparks(r.get('X'), r.get('Y'))
@@ -446,15 +422,95 @@ def fallback(update: Update, context: CallbackContext) -> int:
 def startPrompt(update: Update, context: CallbackContext) -> int:
   replyText(update, "To search for carparks, use the /start command", ReplyKeyboardRemove())
   return ConversationHandler.END
+
+# ====== Basic setup ======
+
+def connectToDatabase() -> pymongo.collection.Collection:
+  client = pymongo.MongoClient(MONGO_CONNECTION_STR.format(mongoUser=MONGO_USERNAME, mongoPwd=MONGO_PWD, databaseName=DATABASE_NAME))
+  return client[DATABASE_NAME]
+
+
+def setup():
+  global db, logger, carparkData, TOKEN, URA_ACCESS_KEY, MY_TRANSPORT_ACCESS_KEY, ONEMAP
+  # enable logging
+  logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+                    level=logging.INFO)
+  logger = logging.getLogger(__name__)
+    
+  # connect to database and retrieve collections
+  db = connectToDatabase()
+
+  if db == None:
+    logger.error("Setup error: Unable to connect to database")
+    return False
+  logger.info("Setup: Connected to db")
+  botCollection = db[BOT_COLLECTION]
+  if botCollection == None:
+    logger.error("Setup error: bot collection not found")
+    return False
+  dataCollection = db[CARPARK_COLLECTION]
+  if dataCollection == None:
+    logger.error("Setup error: data collection not found")
+    return False
+  
+  # load carpark data
+  carparkDataDoc = botCollection.find_one({'name': 'carparkData'})
+  if not carparkDataDoc or not carparkDataDoc.get('data'):
+    logger.error("Setup error: No carpark data information in db")
+    return False
+  carparkData = carparkDataDoc.get('data')
+  
+  # retrieve secrets from database
+  telegramBotDoc = botCollection.find_one({'name': 'telegramBot'})
+  if not telegramBotDoc or not telegramBotDoc.get('token'):
+    logger.error("Setup error: No telegrambot information in db")
+    return False
+  TOKEN = telegramBotDoc.get('token')
+  
+  uraDoc = botCollection.find_one({'name': 'ura'})
+  if not uraDoc or not uraDoc.get('accessKey'):
+    logger.error("Setup error: No ura information in db")
+    return False
+  URA_ACCESS_KEY = uraDoc.get('accessKey')
+  
+  oneMap = botCollection.find_one({'name': 'oneMap'})
+  if not oneMap or not oneMap.get('token') or not oneMap.get('exp') or not oneMap.get('email') or not oneMap.get('password'):
+    logger.error("Setup error: No oneMap information in db")
+    return False
+  ONEMAP['email'] = oneMap.get('email')
+  ONEMAP['password'] = oneMap.get('password')
+  if datetime.fromtimestamp(int(oneMap.get('exp'))) < datetime.today():
+    token, exp = fetchOneMapToken()
+    ONEMAP['token'], ONEMAP['exp'] = token, exp
+    botCollection.update_one({'_id': oneMap['_id']}, {'$set': {'token': token, 'exp': exp}} )
+  else:
+    ONEMAP['token'] = oneMap.get('token')
+    ONEMAP['exp'] = oneMap.get('exp')
+ 
+  myTransport = botCollection.find_one({'name': 'myTransport'})
+  if not myTransport or not myTransport.get('accountKey'):
+    logger.error("Setup error: No myTransport information in db")
+    return False
+  MY_TRANSPORT_ACCESS_KEY = myTransport.get('accountKey')
+  
+  logger.info("Setup: Retrieved information from db")
+  # logger.info(f"token: {TOKEN}\nura access: {URA_ACCESS_KEY}\nonemap: {ONEMAP_TOKEN}\nmyTransport: {MY_TRANSPORT_ACCESS_KEY}")
+
+  return True
+    
+# def addField():
+#   with open('hdb-carpark-information.json', 'r') as f:
+#     data = json.load(f)
+#     doc = db[BOT_COLLECTION].find_one({'name': 'carparkData'})
+#     db[BOT_COLLECTION].update_one({'_id': doc['_id']}, {'$set': {'data': data}})
+
 # ====== RUN THE BOT ======
 def main():
   """Setup"""
   setupSuccess = setup()
   if not setupSuccess:
     raise Exception("Error in setup, unable to proceed....")
-  
-  # addField()
-
+ 
   """Start the bot."""
   # Create the Updater and pass it your bot's token.
   # persistence = PicklePersistence(filename='conversationbot')
@@ -464,33 +520,41 @@ def main():
   # Get the dispatcher to register handlers
   dispatcher = updater.dispatcher
 
-  # Add conversation handler
-  conv_handler = ConversationHandler(
-      entry_points=[CommandHandler('start', start), MessageHandler(Filters.text | Filters.location | Filters.command, startPrompt)],
-      # allow_reentry=True,
-      states={
-          CHOOSING: [
-              MessageHandler(
+  # # Add conversation handler
+  # conv_handler = ConversationHandler(
+  #     entry_points=[CommandHandler('start', start), MessageHandler(Filters.text | Filters.location | Filters.command, startPrompt)],
+  #     # allow_reentry=True,
+  #     states={
+  #         CHOOSING: [
+  #             MessageHandler(
+  #               Filters.text & Filters.regex('^[\s0-9]+$') & ~(Filters.command),
+  #               inputPostalCode
+  #             ),
+  #             MessageHandler(
+  #                 Filters.text & ~(Filters.command),
+  #                 inputText
+  #             ),
+  #             MessageHandler(Filters.location, inputLocation),
+  #         ],
+  #     },
+  #     fallbacks=[MessageHandler(Filters.all, fallback)],
+  #     name="conversation",
+  #     # persistent=True,
+  # )
+  # dispatcher.add_handler(conv_handler)
+
+  # use normal handlers (without conversation handler)
+  dispatcher.add_handler(CallbackQueryHandler(changePage))
+  dispatcher.add_handler(MessageHandler(
                 Filters.text & Filters.regex('^[\s0-9]+$') & ~(Filters.command),
                 inputPostalCode
-              ),
-              MessageHandler(
+              ))
+  dispatcher.add_handler( MessageHandler(
                   Filters.text & ~(Filters.command),
                   inputText
-              ),
-              MessageHandler(Filters.location, inputLocation),
-          ],
-      },
-      fallbacks=[MessageHandler(Filters.all, fallback)],
-      name="conversation",
-      # persistent=True,
-  )
+              ))
 
-
-  dispatcher.add_handler(conv_handler)
-
-  dispatcher.add_handler(CallbackQueryHandler(pageCallback))
-  
+  dispatcher.add_handler(MessageHandler(Filters.location, inputLocation))
   
 
   # show_data_handler = CommandHandler('show_data', show_data)
@@ -500,13 +564,13 @@ def main():
   # dispatcher.add_error_handler(error)
 
   # Start the Bot (USE THIS FOR DEPLOYMENT)
-  updater.start_webhook(listen="0.0.0.0",
-                        port=int(PORT),
-                        url_path=TOKEN)
-  updater.bot.setWebhook('https://noelle-carpark-bot.herokuapp.com/' + TOKEN)
+  # updater.start_webhook(listen="0.0.0.0",
+  #                       port=int(PORT),
+  #                       url_path=TOKEN)
+  # updater.bot.setWebhook('https://noelle-carpark-bot.herokuapp.com/' + TOKEN)
 
   # # Start the Bot (USE THIS IF RUNNING LOCALLY)
-  # updater.start_polling()
+  updater.start_polling()
   
   logger.info("Bot started ♥")
 
