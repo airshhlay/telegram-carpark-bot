@@ -544,6 +544,7 @@ def main():
   # dispatcher.add_handler(conv_handler)
 
   # use normal handlers (without conversation handler)
+  dispatcher.add_handler(CommandHandler('start', start))
   dispatcher.add_handler(CallbackQueryHandler(changePage))
   dispatcher.add_handler(MessageHandler(
                 Filters.text & Filters.regex('^[\s0-9]+$') & ~(Filters.command),
