@@ -91,7 +91,7 @@ GOOGLEMAPS_URL = {
 URA_API = {
   "FETCH_TOKEN": "https://www.ura.gov.sg/uraDataService/insertNewToken.action"
 }
-# TODO: change to check the mongo collection
+
 def fetchUraToken():
   today = date.today()
   data = db[BOT_COLLECTION].find_one({'name': 'ura'})
@@ -198,8 +198,6 @@ def calculateDistanceXY(x1: float, y1: float, x2: float, y2: float) -> float:
 # filters for available parking based on the given x y coordinate, and according to the settings (CARPARK_RANGE, CARPARK_LIMIT)
 def filterForCarparks(x: str, y: str) -> str:
   xFloat, yFloat = convertStrToFloat(x), convertStrToFloat(y)
-  # nearbyCarparks = [(carpark, calculateDistanceXY(xFloat, yFloat, carpark['x_coord'], carpark['y_coord'])) for carpark in carparkData if calculateDistanceXY(xFloat, yFloat, carpark['x_coord'], carpark['y_coord']) <= CARPARK_RANGE]
-  
   nearbyCarparks = []
   
   for carpark in carparkData:
@@ -220,7 +218,6 @@ class Pagination:
   def __init__(self, lst, messageId):
     self.lst = lst
     self.messageId = messageId
-    self.index = 0
     
   def getPage(self, index: int) -> Tuple[str, InlineKeyboardMarkup]:
     carpark = self.lst[index]
@@ -235,8 +232,12 @@ class Pagination:
       
     # add google maps button
     buttons.append([InlineKeyboardButton(text="Open in Google Maps", url=GOOGLEMAPS_URL['LATLON_FORMAT'].format(lat=carpark['lat'], lon=carpark['lon']))])
+    
+    buttons.append([InlineKeyboardButton(text="Refresh Availabilities", callback_data=f"{self.messageId}, refresh")])
     return self.formatPageText(carpark), InlineKeyboardMarkup(buttons)
   
+  def refreshAvailabilities(self, index: int) -> Tuple[str, InlineKeyboardMarkup]:
+    return  
   
   # formats individual carpark information and how it is displayed
   def formatPageText(self, carparkInfo: dict) -> str:
@@ -254,8 +255,6 @@ def processCarparkInfo(carparkInfo: list) -> Pagination:
 # ====== Telegram Markup Keyboards ======
 # keyboard buttons
 share_current_location_btn = [KeyboardButton(text="Share Current Location", request_location=True)]
-# continue_prev_search_btn = [KeyboardButton(text="Continue With Previous Search")]
-# use_saved_location = [KeyboardButton(text="Use a Saved Location")]
 
 # keyboards
 # most often used keyboard that includes the share location button
@@ -278,10 +277,18 @@ def changePage(update: Update, context: CallbackContext) -> None:
     
     split = query.data.split(',')
     messageId, index = int(split[0]), int(split[1])
+  
     
     # TODO: add fallback if pagination not found in data
     pagination = data.get(messageId)
-    text, keyboard = pagination.getPage(index)
+    
+      
+    # refresh button
+    text, keyboard = None, None
+    if index == "refresh":
+      text, keyboard = pagination.refreshAvailabilities()
+    else:
+      text, keyboard = pagination.getPage(index)
     
     query.edit_message_text(text=text, reply_markup=keyboard, parse_mode=ParseMode.HTML)
     # CallbackQueries need to be answered, even if no notification to the user is needed
@@ -293,10 +300,6 @@ def replyWithCarparkInfo(update: Update, context: CallbackContext, carparkInfo: 
   pagination = Pagination(processCarparkInfo(carparkInfo), update.message.message_id)
   text, inlineKeyboard = pagination.getPage(0)
   context.user_data[update.message.message_id] = pagination
-  # for carpark, distance in carparkInfo:
-  #   lat, lon = coordConverter.computeLatLon(carpark['x_coord'], carpark['y_coord'])
-  #   inlineKeyboard = InlineKeyboardMarkup([[InlineKeyboardButton(text="Open in Google Maps", url=GOOGLEMAPS_URL['LATLON_FORMAT'].format(lat=lat, lon=lon))]])
-  #   replyText(update, formatIndividualCarparkInfo(carpark, distance), inlineKeyboard)
   return replyText(update, text, inlineKeyboard)
 
 # ====== Telegram Message Handlers ======
@@ -309,7 +312,7 @@ def error(update: Update, context: CallbackContext):
 # if successful, changes the bot to the CHOOSING state
 # re-entry allowed
 def start(update: Update, context: CallbackContext) -> int:
-  reply_text = "Welcome to Wheretoparksg!\n\nType in your location or postal code, or <b>share your current location</b> using the button below to get started!\n\n<i>Note: You must have location services enabled for telegram in order to share your current location</i>"
+  reply_text = "Welcome to Wheretoparksg! Find available parking near you.\n\nType in your location or postal code, or <b>share your current location</b> using the button below to get started!\n\n<i>Note:\n1.You must have location services enabled for telegram in order to share your current location\n2. Parking availabilities are estimates based on data from data.gov.sg.</i>"
   
   replyText(update, reply_text, keyboard1)
 
