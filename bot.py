@@ -64,38 +64,31 @@ INVALID_POSTAL_CODE = "An error occured - please double check postal code!\n\n<i
 INVALID_ADDRESS = "An error occured - please double check the address!\n\n<i>1. Only Singapore addresses and postal codes are supported\n2. Try refining the address, or use a postal code.</i>"
 INVALID_CURRENT_LOCATION = "An error occured - I can only search for carparks for you if you are in Singapore! If you ARE in Singapore, try using an address or a postal code instead."
 
-FALLBACK_MESSAGE = ""
-
 NO_AVAILABLE_PARKING = "No available parking near this address - try a different location?"
 
 CARPARK_FORMAT = """<b>{name}</b>
 {parkingType}
-Distance away: {distance}m
+\U0001F6E3 Distance away: {distance}m
 """
 
-AVAILABILITY_HEADER = """
-<u>Available Lots</u>
-<ul>{availabilities}</ul>
+AVAILABILITY_HEADER = """====Parking
+{availabilities}
 """
-
-AVAILABILITY_FORMAT = """<li>
-Lot type: {lotType}
+AVAILABILITY_FORMAT ="""
+\U0001F7E0 Lot type: {lotType}
 Total lots: {totalLots}
 <b>Available: {availableLots}</b>
-</li>
 """
 
-RATES_HEADER = """
-<u>Rates</u>
-<ul>{rates}</ul>
+RATES_HEADER = """====Costs
+{rates}
 """
-RATES_FORMAT = """<li>
-{key}:
+RATES_FORMAT = """
+<b>\U0001F535 {key}:</b>
 {value}
-</li>
 """
 
-REMARKS_HEADER = """<u>Remarks</u>
+REMARKS_HEADER = """====Remarks
 {remarks}"""
 REMARKS_FORMAT = """
 <i>{remark}</i>"""
@@ -103,6 +96,7 @@ REMARKS_FORMAT = """
 HOTEL_TYPE_FORMAT = "\U0001F3E8 Hotel Parking"
 HDB_TYPE_FORMAT = "\U0001F3E0	HDB Parking"
 SHOPPINGMALL_TYPE_FORMAT = "Shopping Mall Parking \U0001F6CD"
+OFFICE_TYPE_FORMAT = "\U0001F3E2 Office Building Parking"
 
 # ====== methods for external API integration ======
 GOOGLEMAPS_URL = {
@@ -330,13 +324,18 @@ class Pagination:
     # hotel parking
     elif carparkInfo.get('type') == "hotel":
        carparkMsg = CARPARK_FORMAT.format(name=carparkInfo.get('carpark'), parkingType=HOTEL_TYPE_FORMAT, distance=carparkInfo.get('distance'))
+       
+    elif carparkInfo.get('type') == "office":
+      carparkMsg = CARPARK_FORMAT.format(name=carparkInfo.get('carpark'), parkingType=OFFICE_TYPE_FORMAT, distance=carparkInfo.get('distance'))
+
     
     # format rates
     if carparkInfo.get('rates'):
       rates = ""
-      # rate is formatted as a { key: value } pair
-      for key, value in carparkInfo.get('rates'):
-        rates += RATES_FORMAT.format(key=key, value=value)
+      # rate is formatted as a size 1 { key: value }
+      for rate in carparkInfo.get('rates'):
+        for key, value in rate.items():
+          rates += RATES_FORMAT.format(key=key, value=value)
       ratesMsg = RATES_HEADER.format(rates=rates)
       
     return carparkMsg + availabilityMsg + ratesMsg + remarksMsg
@@ -496,8 +495,6 @@ def inputLocation(update: Update, context: CallbackContext) -> int:
   x = update.message.location.latitude
   y = update.message.location.longitude
   
-  logger.info(x)
-  
   # echo the user location
   replyText(update, LOOKING_FOR_NEAR)
   
@@ -627,13 +624,13 @@ def main():
   # dispatcher.add_error_handler(error)
 
   # Start the Bot (USE THIS FOR DEPLOYMENT)
-  updater.start_webhook(listen="0.0.0.0",
-                        port=int(PORT),
-                        url_path=TOKEN)
-  updater.bot.setWebhook('https://noelle-carpark-bot.herokuapp.com/' + TOKEN)
+  # updater.start_webhook(listen="0.0.0.0",
+  #                       port=int(PORT),
+  #                       url_path=TOKEN)
+  # updater.bot.setWebhook('https://noelle-carpark-bot.herokuapp.com/' + TOKEN)
 
   # Start the Bot (USE THIS IF RUNNING LOCALLY)
-  # updater.start_polling()
+  updater.start_polling()
   
   logger.info("Bot started ♥")
 
