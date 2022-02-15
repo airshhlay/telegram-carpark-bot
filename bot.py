@@ -341,7 +341,7 @@ class Pagination:
           rates += RATES_FORMAT.format(key=key, value=value)
       ratesMsg = RATES_HEADER.format(rates=rates)
       
-    return carparkMsg + "\n" + availabilityMsg + "\n" + ratesMsg + "\n" + remarksMsg
+    return carparkMsg + availabilityMsg + ratesMsg +  remarksMsg
     
 # ====== Telegram Markup Keyboards ======
 # keyboard buttons
