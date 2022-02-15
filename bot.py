@@ -99,7 +99,8 @@ REMARKS_FORMAT = """
 HOTEL_TYPE_FORMAT = "\U0001F3E8 Hotel Parking"
 HDB_TYPE_FORMAT = "\U0001F3E0	HDB Parking"
 SHOPPINGMALL_TYPE_FORMAT = "Shopping Mall Parking \U0001F6CD"
-OFFICE_TYPE_FORMAT = "\U0001F3E2 Office Building Parking"
+OFFICE_TYPE_FORMAT = "\U0001F3E2 Office Building"
+HOSPITAL_TYPE_FORMAT = "\U0001F3E5 Hospital Parking"
 
 # ====== methods for external API integration ======
 GOOGLEMAPS_URL = {
@@ -328,9 +329,12 @@ class Pagination:
     elif carparkInfo.get('type') == "hotel":
        carparkMsg = CARPARK_FORMAT.format(name=carparkInfo.get('carpark'), parkingType=HOTEL_TYPE_FORMAT, distance=carparkInfo.get('distance'))
        
+    # office parking
     elif carparkInfo.get('type') == "office":
       carparkMsg = CARPARK_FORMAT.format(name=carparkInfo.get('carpark'), parkingType=OFFICE_TYPE_FORMAT, distance=carparkInfo.get('distance'))
-
+      
+    elif carparkInfo.get('type') == "hospital":
+      carparkMsg = CARPARK_FORMAT.format(name=carparkInfo.get('carpark'), parkingType=HOSPITAL_TYPE_FORMAT, distance=carparkInfo.get('distance'))
     
     # format rates
     if carparkInfo.get('rates'):
