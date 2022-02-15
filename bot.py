@@ -33,6 +33,7 @@ PORT = int(os.environ.get("PORT", 5000))
 coordConverter = SVY21()
 # tokens and access keys
 TOKEN, URA_ACCESS_KEY, MY_TRANSPORT_ACCESS_KEY, ONEMAP = None, None, None, {}
+DEV_ENV = os.environ.get("DEV_ENV", "")
 
 # database
 db = None
@@ -648,14 +649,15 @@ def main():
   # log all errors
   # dispatcher.add_error_handler(error)
 
-  # Start the Bot (USE THIS FOR DEPLOYMENT)
-  updater.start_webhook(listen="0.0.0.0",
-                        port=int(PORT),
-                        url_path=TOKEN)
-  updater.bot.setWebhook('https://noelle-carpark-bot.herokuapp.com/' + TOKEN)
-
-  # Start the Bot (USE THIS IF RUNNING LOCALLY)
-  # updater.start_polling()
+  # Start the Bot
+  if (DEV_ENV == "PROD"):
+    updater.start_webhook(listen="0.0.0.0",
+                          port=int(PORT),
+                          url_path=TOKEN)
+    updater.bot.setWebhook('https://noelle-carpark-bot.herokuapp.com/' + TOKEN)
+  else:
+    # Start the Bot (USE THIS IF RUNNING LOCALLY)
+    updater.start_polling()
   
   logger.info("Bot started ♥")
 
