@@ -84,7 +84,7 @@ class SVY21:
         eTerm3 = w6 / 5040 * cos6Lat * (61 - 479 * t2 + 179 * t4 - t6)
         E = self.oE + self.k * v * w * cosLat * (1 + eTerm1 + eTerm2 + eTerm3)
 
-        return (N, E)
+        return (E, N)
 
     def calcM(self, lat):
         latR = lat * math.pi / 180
