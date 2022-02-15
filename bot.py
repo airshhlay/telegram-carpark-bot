@@ -91,10 +91,8 @@ RATES_FORMAT = """<b>\U0001F539 {key}:</b>
 
 """
 
-REMARKS_HEADER = """====Remarks
-{remarks}"""
-REMARKS_FORMAT = """
-<i>{remark}</i>"""
+REMARKS_HEADER = """<b>--- Remarks \U0001F4DD ---</b>
+<i>{remarks}</i>"""
 
 HOTEL_TYPE_FORMAT = "\U0001F3E8 Hotel Parking"
 HDB_TYPE_FORMAT = "\U0001F3E0	HDB Parking"
@@ -344,6 +342,10 @@ class Pagination:
         for key, value in rate.items():
           rates += RATES_FORMAT.format(key=key, value=value)
       ratesMsg = RATES_HEADER.format(rates=rates)
+      
+    # format remarks
+    if carparkInfo.get('remarks') and carparkInfo.get('remarks') != "":
+      remarksMsg = REMARKS_HEADER.format(remarks=carparkInfo.get('remarks'))
       
     return carparkMsg + availabilityMsg + ratesMsg +  remarksMsg
     
