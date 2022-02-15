@@ -77,7 +77,7 @@ CARPARK_FORMAT = """<b>{name}</b>
 AVAILABILITY_HEADER = """<b>--- Parking \U0001F697 ---</b>
 {availabilities}
 """
-AVAILABILITY_FORMAT ="""\U0001F7E0 Lot type: {lotType}
+AVAILABILITY_FORMAT ="""\U0001F538 Lot type: {lotType}
 Total lots: {totalLots}
 <b>Available: {availableLots}</b>
 
@@ -86,7 +86,7 @@ Total lots: {totalLots}
 RATES_HEADER = """<b>--- Rates \U0001F4B3 ---</b>
 {rates}
 """
-RATES_FORMAT = """<b>\U0001F535 {key}:</b>
+RATES_FORMAT = """<b>\U0001F539 {key}:</b>
 {value}
 
 """
