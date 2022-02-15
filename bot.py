@@ -71,23 +71,24 @@ ERROR_REQUEST_TIMEOUT = "Unable to contact my sources at the moment - please wai
 CARPARK_FORMAT = """<b>{name}</b>
 {parkingType}
 \U0001F6E3 Distance away: {distance}m
+
 """
 
-AVAILABILITY_HEADER = """====Parking
+AVAILABILITY_HEADER = """<b>====Parking \U0001F697====</b>
 {availabilities}
 """
-AVAILABILITY_FORMAT ="""
-\U0001F7E0 Lot type: {lotType}
+AVAILABILITY_FORMAT ="""\U0001F7E0 Lot type: {lotType}
 Total lots: {totalLots}
 <b>Available: {availableLots}</b>
+
 """
 
-RATES_HEADER = """====Costs
+RATES_HEADER = """<b>====Rates \U0001F4B3====</b>
 {rates}
 """
-RATES_FORMAT = """
-<b>\U0001F535 {key}:</b>
+RATES_FORMAT = """<b>\U0001F535 {key}:</b>
 {value}
+
 """
 
 REMARKS_HEADER = """====Remarks
@@ -340,7 +341,7 @@ class Pagination:
           rates += RATES_FORMAT.format(key=key, value=value)
       ratesMsg = RATES_HEADER.format(rates=rates)
       
-    return carparkMsg + availabilityMsg + ratesMsg + remarksMsg
+    return carparkMsg + "\n" + availabilityMsg + "\n" + ratesMsg + "\n" + remarksMsg
     
 # ====== Telegram Markup Keyboards ======
 # keyboard buttons
