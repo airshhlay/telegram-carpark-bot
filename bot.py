@@ -71,15 +71,26 @@ NO_AVAILABLE_PARKING = "No available parking near this address - try a different
 CARPARK_FORMAT = """<b>{name}</b>
 Distance away: {distance}m
 
-Available lots: {availableLots}
-Lot types: {lotType}
+{availabilities}
 
-Weekday Min: {weekdayTime} mins
-Weekday Rate: {weekdayRate}
-SatDay Min: {satDayMin} mins
-SatDay Rate: {satDayRate}
-Sun PH Min: {sunMin} mins
-Sun PH Rate: {sunRate}
+<u>Rates</u>
+{rates}
+"""
+
+AVAILABILITY_FORMAT = """
+Lot type: {lotType}
+Total lots: {totalLots}
+<b>Available: {availableLots}</b>
+"""
+
+RATES_FORMAT = """
+{key}:
+{value}
+"""
+
+RATES_FORMAT_BOLDED = """
+<b>{key}:
+{value}</b>
 """
 
 # ====== methods for external API integration ======
@@ -90,6 +101,16 @@ GOOGLEMAPS_URL = {
 
 URA_API = {
   "FETCH_TOKEN": "https://www.ura.gov.sg/uraDataService/insertNewToken.action"
+}
+
+ONEMAP_API = {
+  "SEARCH": "https://developers.onemap.sg/commonapi/search?searchVal={searchVal}&returnGeom=Y&getAddrDetails=Y&pageNum=1",
+  "REVERSE_GEOCODE": "https://developers.onemap.sg/privateapi/commonsvc/revgeocode?location={x},{y}&token={token}&addressType=all",
+  "GET_TOKEN": "https://developers.onemap.sg/privateapi/auth/post/getToken"
+}
+
+DATA_GOV_API = {
+  "CARPARK_AVAILABILITY": "https://api.data.gov.sg/v1/transport/carpark-availability"
 }
 
 def fetchUraToken():
@@ -114,11 +135,7 @@ def fetchUraToken():
     return token
   return ura_token
 
-ONEMAP_API = {
-  "SEARCH": "https://developers.onemap.sg/commonapi/search?searchVal={searchVal}&returnGeom=Y&getAddrDetails=Y&pageNum=1",
-  "REVERSE_GEOCODE": "https://developers.onemap.sg/privateapi/commonsvc/revgeocode?location={x},{y}&token={token}&addressType=all",
-  "GET_TOKEN": "https://developers.onemap.sg/privateapi/auth/post/getToken"
-}
+
 def fetchOneMapToken() -> Tuple[str, str]:
   body = {'email': ONEMAP['email'], 'password': ONEMAP['password']}
   r = doPostRequest(ONEMAP_API['GET_TOKEN'], body)
@@ -143,6 +160,16 @@ def fetchLocationDataFromCoord(x: str, y: str) -> dict:
   if r and r.get('GeocodeInfo') and len(r.get('GeocodeInfo')) > 0:
     return r.get('GeocodeInfo')[0]
   
+  return None
+
+def fetchCarparkAvailabilities() -> dict:
+  url = DATA_GOV_API['CARPARK_AVAILABILITY']
+  r = doGetRequest(url)
+  if r and r.get('items'):
+    items = r.get('items')
+    if len(items) > 0 and items[0]:
+      if items[0].get('carpark_data'):
+        return items[0].get('carpark_data')
   return None
 
 # generic method to make a get request to specified url
@@ -214,10 +241,14 @@ def filterForCarparks(x: str, y: str) -> str:
       
   return nearbyCarparks
 
+
 class Pagination:
   def __init__(self, lst, messageId):
     self.lst = lst
     self.messageId = messageId
+    self.lastRefresh = datetime.now()
+    self.hdbCarparkNumbers = set([carparkInfo['car_park_no'] for carparkInfo in self.lst if carparkInfo['type'] == 'hdb']) # indices of hdb carparks in the list
+    self.availabilities = {}
     
   def getPage(self, index: int) -> Tuple[str, InlineKeyboardMarkup]:
     carpark = self.lst[index]
@@ -231,26 +262,57 @@ class Pagination:
       buttons.append([InlineKeyboardButton(text="next >", callback_data=(f"{self.messageId},{index + 1}"))])
       
     # add google maps button
-    buttons.append([InlineKeyboardButton(text="Open in Google Maps", url=GOOGLEMAPS_URL['LATLON_FORMAT'].format(lat=carpark['lat'], lon=carpark['lon']))])
+    buttons.append([InlineKeyboardButton(text="Open in Google Maps", url=GOOGLEMAPS_URL['LATLON_FORMAT'].format(lat=carpark['latitude'], lon=carpark['longitude']))])
     
-    buttons.append([InlineKeyboardButton(text="Refresh Availabilities", callback_data=f"{self.messageId}, refresh")])
+    buttons.append([InlineKeyboardButton(text="Refresh Availabilities", callback_data=f"{self.messageId},refresh")])
     return self.formatPageText(carpark), InlineKeyboardMarkup(buttons)
   
-  def refreshAvailabilities(self, index: int) -> Tuple[str, InlineKeyboardMarkup]:
+  def getAvailabilities(self) -> None:
+    if len(self.hdbCarparkNumbers) > 0:
+      carparkAvailabilities = fetchCarparkAvailabilities()
+      if not carparkAvailabilities:
+        logger.error("Unable to fetch carpark availabilities - None received")
+        return
+      for data in carparkAvailabilities:
+        # missing information in data retrieved from api
+        if not data.get('carpark_number') or not data.get('carpark_info'):
+          logger.error("Missing information in availability data received - No carpark number / carpark info")
+          continue
+        
+        # get the carpark number
+        carparkNumber = data.get('carpark_number')
+        
+        # skip
+        if carparkNumber not in self.hdbCarparkNumbers:
+          continue
+        
+        info = data.get('carpark_info')
+        self.availabilities[carparkNumber] = info
+      
+      logger.info("Refreshed availabilities for %s", self.hdbCarparkNumbers)
+      self.lastRefresh = datetime.now()
     return  
   
   # formats individual carpark information and how it is displayed
   def formatPageText(self, carparkInfo: dict) -> str:
-    return CARPARK_FORMAT.format(name=carparkInfo.get('address'), distance=carparkInfo['distance'], availableLots="NIL", lotType="NIL", weekdayTime="NIL", weekdayRate="NIL", satDayMin="NIL", satDayRate="NIL", sunMin="NIL", sunRate="NIL")
-  
-# creates a Pagination object which consolidates the available parking to into one message for the user
-def processCarparkInfo(carparkInfo: list) -> Pagination:
-  for carpark in carparkInfo:
-    lat, lon = coordConverter.computeLatLon(carpark['x_coord'], carpark['y_coord'])
-    carpark['lat'] = lat
-    carpark['lon'] = lon
-
-  return carparkInfo
+    availabilities = ""
+    rates = ""
+    
+    # format availability (only for hdb)
+    if carparkInfo["type"] == "hdb" and carparkInfo["car_park_no"] in self.availabilities:
+      data = self.availabilities[carparkInfo["car_park_no"]]
+      availabilities = "<u>Lots</u>"
+      for item in data:
+        availabilities += AVAILABILITY_FORMAT.format(lotType=item['lot_type'],totalLots=item['total_lots'], availableLots=item['lots_available'])
+    
+    # TODO: UNCOMMENT THIS SECTION ONCE RATE FORMATTING IS FINALISED
+    # # format rates
+    # if carparkInfo.get("rates"):
+    #   rates = "<u>Rates</u>"
+    #   for key, value in carparkInfo.get("rates").items():
+    #     rates += RATES_FORMAT.format(key=key, value=value)
+      
+    return CARPARK_FORMAT.format(name=carparkInfo.get('address'), distance=carparkInfo['distance'], availabilities=availabilities, rates=rates)
     
 # ====== Telegram Markup Keyboards ======
 # keyboard buttons
@@ -276,20 +338,30 @@ def changePage(update: Update, context: CallbackContext) -> None:
     data = context.user_data
     
     split = query.data.split(',')
-    messageId, index = int(split[0]), int(split[1])
-  
-    
-    # TODO: add fallback if pagination not found in data
+    messageId, index = int(split[0]), split[1]
+
     pagination = data.get(messageId)
     
-      
-    # refresh button
+    # pagination object not found, do nothing
+    if not pagination:
+      query.answer()
+      return
+    
     text, keyboard = None, None
     if index == "refresh":
-      text, keyboard = pagination.refreshAvailabilities()
+      # refresh button
+      if (datetime.now() - pagination.lastRefresh).total_seconds() > 120:
+        # prevent constant refreshes that increase load - 2 minute cooldown
+        pagination.getAvailabilities()
+        text, keyboard = pagination.getPage(0)
     else:
+      # flipping pages
+      index = int(index)
       text, keyboard = pagination.getPage(index)
     
+    if (not text or not keyboard):
+      query.answer()
+      return
     query.edit_message_text(text=text, reply_markup=keyboard, parse_mode=ParseMode.HTML)
     # CallbackQueries need to be answered, even if no notification to the user is needed
     # Some clients may have trouble otherwise. See https://core.telegram.org/bots/api#callbackquery
@@ -297,7 +369,8 @@ def changePage(update: Update, context: CallbackContext) -> None:
 
 # reply the user with all the nearby carparks
 def replyWithCarparkInfo(update: Update, context: CallbackContext, carparkInfo: list):
-  pagination = Pagination(processCarparkInfo(carparkInfo), update.message.message_id)
+  pagination = Pagination(carparkInfo, update.message.message_id)
+  pagination.getAvailabilities()
   text, inlineKeyboard = pagination.getPage(0)
   context.user_data[update.message.message_id] = pagination
   return replyText(update, text, inlineKeyboard)
@@ -312,7 +385,7 @@ def error(update: Update, context: CallbackContext):
 # if successful, changes the bot to the CHOOSING state
 # re-entry allowed
 def start(update: Update, context: CallbackContext) -> int:
-  reply_text = "Welcome to Wheretoparksg! Find available parking near you.\n\nType in your location or postal code, or <b>share your current location</b> using the button below to get started!\n\n<i>Note:\n1.You must have location services enabled for telegram in order to share your current location\n2. Parking availabilities are estimates based on data from data.gov.sg.</i>"
+  reply_text = "Welcome to Wheretoparksg! Find available parking near you.\n\nType in your location or postal code, or <b>share your current location</b> using the button below to get started!\n\n<i>Note:\n1.You must have location services enabled for telegram in order to share your current location\n2. Parking availabilities are estimates based on data from data.gov.sg.\n3. Due to limitations, I am unable to display carpark availabilities for shopping malls.</i>"
   
   replyText(update, reply_text, keyboard1)
 
@@ -417,14 +490,6 @@ def inputLocation(update: Update, context: CallbackContext) -> int:
   replyWithCarparkInfo(update, context, res)
   return ConversationHandler.END
 
-# fallback handler for unexpected user input
-def fallback(update: Update, context: CallbackContext) -> int:
-  replyText(update, "Send me your current location, or type in an address or postal code!")
-  return CHOOSING
-
-def startPrompt(update: Update, context: CallbackContext) -> int:
-  replyText(update, "To search for carparks, use the /start command", ReplyKeyboardRemove())
-  return ConversationHandler.END
 
 # ====== Basic setup ======
 
@@ -497,15 +562,9 @@ def setup():
   MY_TRANSPORT_ACCESS_KEY = myTransport.get('accountKey')
   
   logger.info("Setup: Retrieved information from db")
-  # logger.info(f"token: {TOKEN}\nura access: {URA_ACCESS_KEY}\nonemap: {ONEMAP_TOKEN}\nmyTransport: {MY_TRANSPORT_ACCESS_KEY}")
 
   return True
-    
-# def addField():
-#   with open('hdb-carpark-information.json', 'r') as f:
-#     data = json.load(f)
-#     doc = db[BOT_COLLECTION].find_one({'name': 'carparkData'})
-#     db[BOT_COLLECTION].update_one({'_id': doc['_id']}, {'$set': {'data': data}})
+  
 
 # ====== RUN THE BOT ======
 def main():
@@ -523,29 +582,6 @@ def main():
   # Get the dispatcher to register handlers
   dispatcher = updater.dispatcher
 
-  # # Add conversation handler
-  # conv_handler = ConversationHandler(
-  #     entry_points=[CommandHandler('start', start), MessageHandler(Filters.text | Filters.location | Filters.command, startPrompt)],
-  #     # allow_reentry=True,
-  #     states={
-  #         CHOOSING: [
-  #             MessageHandler(
-  #               Filters.text & Filters.regex('^[\s0-9]+$') & ~(Filters.command),
-  #               inputPostalCode
-  #             ),
-  #             MessageHandler(
-  #                 Filters.text & ~(Filters.command),
-  #                 inputText
-  #             ),
-  #             MessageHandler(Filters.location, inputLocation),
-  #         ],
-  #     },
-  #     fallbacks=[MessageHandler(Filters.all, fallback)],
-  #     name="conversation",
-  #     # persistent=True,
-  # )
-  # dispatcher.add_handler(conv_handler)
-
   # use normal handlers (without conversation handler)
   dispatcher.add_handler(CommandHandler('start', start))
   dispatcher.add_handler(CallbackQueryHandler(changePage))
@@ -559,10 +595,6 @@ def main():
               ))
 
   dispatcher.add_handler(MessageHandler(Filters.location, inputLocation))
-  
-
-  # show_data_handler = CommandHandler('show_data', show_data)
-  # dispatcher.add_handler(show_data_handler)
 
   # log all errors
   # dispatcher.add_error_handler(error)
@@ -573,11 +605,10 @@ def main():
                         url_path=TOKEN)
   updater.bot.setWebhook('https://noelle-carpark-bot.herokuapp.com/' + TOKEN)
 
-  # # Start the Bot (USE THIS IF RUNNING LOCALLY)
+  # Start the Bot (USE THIS IF RUNNING LOCALLY)
   # updater.start_polling()
   
   logger.info("Bot started ♥")
-
 
   # Run the bot until you press Ctrl-C or the process receives SIGINT,
   # SIGTERM or SIGABRT. This should be used most of the time, since
