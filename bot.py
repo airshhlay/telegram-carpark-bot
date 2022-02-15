@@ -69,29 +69,40 @@ FALLBACK_MESSAGE = ""
 NO_AVAILABLE_PARKING = "No available parking near this address - try a different location?"
 
 CARPARK_FORMAT = """<b>{name}</b>
+{parkingType}
 Distance away: {distance}m
-
-{availabilities}
-
-<u>Rates</u>
-{rates}
 """
 
-AVAILABILITY_FORMAT = """
+AVAILABILITY_HEADER = """
+<u>Available Lots</u>
+<ul>{availabilities}</ul>
+"""
+
+AVAILABILITY_FORMAT = """<li>
 Lot type: {lotType}
 Total lots: {totalLots}
 <b>Available: {availableLots}</b>
+</li>
 """
 
-RATES_FORMAT = """
+RATES_HEADER = """
+<u>Rates</u>
+<ul>{rates}</ul>
+"""
+RATES_FORMAT = """<li>
 {key}:
 {value}
+</li>
 """
 
-RATES_FORMAT_BOLDED = """
-<b>{key}:
-{value}</b>
-"""
+REMARKS_HEADER = """<u>Remarks</u>
+{remarks}"""
+REMARKS_FORMAT = """
+<i>{remark}</i>"""
+
+HOTEL_TYPE_FORMAT = "\U0001F3E8 Hotel Parking"
+HDB_TYPE_FORMAT = "\U0001F3E0	HDB Parking"
+SHOPPINGMALL_TYPE_FORMAT = "Shopping Mall Parking \U0001F6CD"
 
 # ====== methods for external API integration ======
 GOOGLEMAPS_URL = {
@@ -247,7 +258,7 @@ class Pagination:
     self.lst = lst
     self.messageId = messageId
     self.lastRefresh = datetime.now()
-    self.hdbCarparkNumbers = set([carparkInfo['car_park_no'] for carparkInfo in self.lst if carparkInfo['type'] == 'hdb']) # indices of hdb carparks in the list
+    self.hdbCarparkNumbers = set([carparkInfo['car_park_no'] for carparkInfo in self.lst if carparkInfo.get('type') == 'hdb']) # indices of hdb carparks in the list
     self.availabilities = {}
     
   def getPage(self, index: int) -> Tuple[str, InlineKeyboardMarkup]:
@@ -295,24 +306,39 @@ class Pagination:
   
   # formats individual carpark information and how it is displayed
   def formatPageText(self, carparkInfo: dict) -> str:
-    availabilities = ""
-    rates = ""
+    carparkMsg = ""
+    availabilityMsg = ""
+    ratesMsg = ""
+    remarksMsg = ""
     
-    # format availability (only for hdb)
-    if carparkInfo["type"] == "hdb" and carparkInfo["car_park_no"] in self.availabilities:
-      data = self.availabilities[carparkInfo["car_park_no"]]
-      availabilities = "<u>Lots</u>"
-      for item in data:
-        availabilities += AVAILABILITY_FORMAT.format(lotType=item['lot_type'],totalLots=item['total_lots'], availableLots=item['lots_available'])
-    
-    # TODO: UNCOMMENT THIS SECTION ONCE RATE FORMATTING IS FINALISED
-    # # format rates
-    # if carparkInfo.get("rates"):
-    #   rates = "<u>Rates</u>"
-    #   for key, value in carparkInfo.get("rates").items():
-    #     rates += RATES_FORMAT.format(key=key, value=value)
+    # hdb parking
+    if carparkInfo.get('type') == "hdb":
+      carparkMsg = CARPARK_FORMAT.format(name=carparkInfo.get('address'), parkingType=HDB_TYPE_FORMAT, distance=carparkInfo.get('distance'))
       
-    return CARPARK_FORMAT.format(name=carparkInfo.get('address'), distance=carparkInfo['distance'], availabilities=availabilities, rates=rates)
+      # format availabilities (for hdb)
+      if carparkInfo.get('car_park_no') in self.availabilities:
+        data = self.availabilities[carparkInfo['car_park_no']]
+        availabilities = ""
+        for item in data:
+          availabilities += AVAILABILITY_FORMAT.format(lotType=item['lot_type'],totalLots=item['total_lots'], availableLots=item['lots_available'])
+        availabilityMsg = AVAILABILITY_HEADER.format(availabilities=availabilities)
+        
+    # shopping mall parking
+    elif carparkInfo.get('type') == "shopping_mall":
+      carparkMsg = CARPARK_FORMAT.format(name=carparkInfo.get('carpark'), parkingType=SHOPPINGMALL_TYPE_FORMAT, distance=carparkInfo.get('distance'))
+      
+    # hotel parking
+    elif carparkInfo.get('type') == "hotel":
+       carparkMsg = CARPARK_FORMAT.format(name=carparkInfo.get('carpark'), parkingType=HOTEL_TYPE_FORMAT, distance=carparkInfo.get('distance'))
+    
+    # format rates
+    if carparkInfo.get('rates'):
+      rates = ""
+      for key, value in carparkInfo.get('rates').items():
+        rates += RATES_FORMAT.format(key=key, value=value)
+      ratesMsg = RATES_HEADER.format(rates=rates)
+      
+    return carparkMsg + availabilityMsg + ratesMsg + remarksMsg
     
 # ====== Telegram Markup Keyboards ======
 # keyboard buttons
