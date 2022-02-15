@@ -66,6 +66,8 @@ INVALID_CURRENT_LOCATION = "An error occured - I can only search for carparks fo
 
 NO_AVAILABLE_PARKING = "No available parking near this address - try a different location?"
 
+ERROR_REQUEST_TIMEOUT = "Unable to contact my sources at the moment - please wait a few moments before trying again!"
+
 CARPARK_FORMAT = """<b>{name}</b>
 {parkingType}
 \U0001F6E3 Distance away: {distance}m
@@ -415,7 +417,7 @@ def start(update: Update, context: CallbackContext) -> int:
   
   replyText(update, reply_text, keyboard1)
 
-  return CHOOSING
+  return
 
 # user input handler for addresses
 def inputText(update: Update, context: CallbackContext) -> int:
@@ -428,12 +430,17 @@ def inputText(update: Update, context: CallbackContext) -> int:
 
   msg = replyText(update, ADDRESS_RECEIVED)
   
-  r = fetchLocationDataFromAddr(user_input)
+  r = None
+  try:
+    r = fetchLocationDataFromAddr(user_input)
+  except requests.exceptions.RequestException:
+    replyText(update, ERROR_REQUEST_TIMEOUT)
+    return
   
   if not r or not (r.get('X') and r.get('Y')):
     # unable to fetch location dataz
     replyText(update, INVALID_ADDRESS, keyboard1)
-    return CHOOSING
+    return
 
   addr = user_input
   if r.get('ADDRESS'):
@@ -467,7 +474,13 @@ def inputPostalCode(update: Update, context: CallbackContext) -> int:
     return CHOOSING
   
   msg = replyText(update, POSTAL_CODE_RECEIVED)
-  r = fetchLocationDataFromAddr(user_input)
+  r = None
+  
+  try:
+    r = fetchLocationDataFromAddr(user_input)
+  except requests.exceptions.RequestException:
+    replyText(update, ERROR_REQUEST_TIMEOUT)
+    return
   
   if not r or not (r.get('X') and r.get('Y')):
     # unable to fetch location dataz
@@ -499,17 +512,22 @@ def inputLocation(update: Update, context: CallbackContext) -> int:
   replyText(update, LOOKING_FOR_NEAR)
   
   # perform reverse geo-coding
-  r = fetchLocationDataFromCoord(x, y)
+  r = None
+  try:
+    r = fetchLocationDataFromCoord(x, y)
+  except requests.exceptions.RequestException:
+    replyText(update, ERROR_REQUEST_TIMEOUT)
+    return
+  
   if not r or not (r.get('XCOORD') or r.get('YCOORD')):
     replyText(update, INVALID_CURRENT_LOCATION)
-    return CHOOSING
-
+    return
 
   # retrieve and display carpark information
   res = filterForCarparks(r.get('XCOORD'), r.get('YCOORD'))
   if len(res) == 0:
     replyText(update, NO_AVAILABLE_PARKING)
-    return CHOOSING
+    return
   
   replyWithCarparkInfo(update, context, res)
   return ConversationHandler.END
