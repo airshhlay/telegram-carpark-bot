@@ -334,7 +334,8 @@ class Pagination:
     # format rates
     if carparkInfo.get('rates'):
       rates = ""
-      for key, value in carparkInfo.get('rates').items():
+      # rate is formatted as a { key: value } pair
+      for key, value in carparkInfo.get('rates'):
         rates += RATES_FORMAT.format(key=key, value=value)
       ratesMsg = RATES_HEADER.format(rates=rates)
       
