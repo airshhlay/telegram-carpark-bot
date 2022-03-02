@@ -378,8 +378,9 @@ def changePage(update: Update, context: CallbackContext) -> None:
 
     pagination = data.get(messageId)
     
-    # pagination object not found, do nothing
+    # pagination object not found, tell the user that the request has expired
     if not pagination:
+      query.edit_message_text(text="This request has expired. Please send me a location again!")
       query.answer()
       return
     
