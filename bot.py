@@ -121,29 +121,6 @@ DATA_GOV_API = {
   "CARPARK_AVAILABILITY": "https://api.data.gov.sg/v1/transport/carpark-availability"
 }
 
-def fetchUraToken():
-  today = date.today()
-  data = db[BOT_COLLECTION].find_one({'name': 'ura'})
-  ura_token_last_regen = data.get("URA_TOKEN_LAST_REGENERATED")
-  ura_token = data.get('URA_TOKEN')
-
-  if not URA_ACCESS_KEY:
-    raise TelegramError('No URA access key found')
-
-  if not ura_token or not ura_token_last_regen or ura_token_last_regen < date.today:
-    # fetch new ura token
-    r = doGetRequest(URA_API['FETCH_TOKEN'], {'AccessKey': URA_ACCESS_KEY})
-    token = r.get('Result')
-    if not token:
-      raise TelegramError(f"Error occured when fetching URA token {str(r)}")
-    
-    data['URA_TOKEN_LAST_REGENERATED'] = today
-    data['URA_TOKEN'] = token
-
-    return token
-  return ura_token
-
-
 def fetchOneMapToken() -> Tuple[str, str]:
   body = {'email': ONEMAP['email'], 'password': ONEMAP['password']}
   r = doPostRequest(ONEMAP_API['GET_TOKEN'], body)
@@ -387,7 +364,7 @@ def changePage(update: Update, context: CallbackContext) -> None:
     text, keyboard = None, None
     if index == "refresh":
       # refresh button
-      if (datetime.now() - pagination.lastRefresh).total_seconds() > 120:
+      if (datetime.now() - pagination.lastRefresh).total_seconds() > 60:
         # prevent constant refreshes that increase load - 2 minute cooldown
         pagination.getAvailabilities()
         text, keyboard = pagination.getPage(0)
