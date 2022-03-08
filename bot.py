@@ -1,6 +1,3 @@
-"""
-Reference: https://github.com/python-telegram-bot/python-telegram-bot/blob/master/examples/persistentconversationbot.py
-"""
 
 from typing import Tuple
 import time
@@ -32,7 +29,7 @@ from svy21 import SVY21
 PORT = int(os.environ.get("PORT", 5000))
 coordConverter = SVY21()
 # tokens and access keys
-TOKEN, URA_ACCESS_KEY, MY_TRANSPORT_ACCESS_KEY, ONEMAP = None, None, None, {}
+TOKEN, ONEMAP = None, {}
 DEV_ENV = os.environ.get("DEV_ENV", "")
 
 # database
@@ -107,10 +104,6 @@ GOOGLEMAPS_URL = {
   "ADDRESS_FORMAT": "https://www.google.com/maps/place/{address}"
 }
 
-URA_API = {
-  "FETCH_TOKEN": "https://www.ura.gov.sg/uraDataService/insertNewToken.action"
-}
-
 ONEMAP_API = {
   "SEARCH": "https://developers.onemap.sg/commonapi/search?searchVal={searchVal}&returnGeom=Y&getAddrDetails=Y&pageNum=1",
   "REVERSE_GEOCODE": "https://developers.onemap.sg/privateapi/commonsvc/revgeocode?location={x},{y}&token={token}&addressType=all",
@@ -121,7 +114,16 @@ DATA_GOV_API = {
   "CARPARK_AVAILABILITY": "https://api.data.gov.sg/v1/transport/carpark-availability"
 }
 
+def refreshOneMapToken():
+  if datetime.fromtimestamp(int(ONEMAP['exp'])) < datetime.today():
+    botCollection = db[BOT_COLLECTION]
+    oneMap = botCollection.find_one({'name': 'oneMap'})
+    token, exp = fetchOneMapToken()
+    ONEMAP['token'], ONEMAP['exp'] = token, exp
+    botCollection.update_one({'_id': oneMap['_id']}, {'$set': {'token': token, 'exp': exp}} )
+
 def fetchOneMapToken() -> Tuple[str, str]:
+  refreshOneMapToken()
   body = {'email': ONEMAP['email'], 'password': ONEMAP['password']}
   r = doPostRequest(ONEMAP_API['GET_TOKEN'], body)
   if r.get('access_token') and r.get('expiry_timestamp'):
@@ -131,6 +133,7 @@ def fetchOneMapToken() -> Tuple[str, str]:
     raise Exception()
   
 def fetchLocationDataFromAddr(addr: str) -> dict:
+  refreshOneMapToken()
   url = ONEMAP_API['SEARCH'].format(searchVal=addr)
   r = doGetRequest(url)
   
@@ -140,6 +143,7 @@ def fetchLocationDataFromAddr(addr: str) -> dict:
   return None
 
 def fetchLocationDataFromCoord(x: str, y: str) -> dict:
+  refreshOneMapToken()
   url = ONEMAP_API['REVERSE_GEOCODE'].format(x=x, y=y, token=ONEMAP['token'])
   r = doGetRequest(url)
   if r and r.get('GeocodeInfo') and len(r.get('GeocodeInfo')) > 0:
@@ -563,36 +567,20 @@ def setup():
     return False
   TOKEN = telegramBotDoc.get('token')
   
-  uraDoc = botCollection.find_one({'name': 'ura'})
-  if not uraDoc or not uraDoc.get('accessKey'):
-    logger.error("Setup error: No ura information in db")
-    return False
-  URA_ACCESS_KEY = uraDoc.get('accessKey')
-  
   oneMap = botCollection.find_one({'name': 'oneMap'})
   if not oneMap or not oneMap.get('token') or not oneMap.get('exp') or not oneMap.get('email') or not oneMap.get('password'):
     logger.error("Setup error: No oneMap information in db")
     return False
   ONEMAP['email'] = oneMap.get('email')
   ONEMAP['password'] = oneMap.get('password')
-  if datetime.fromtimestamp(int(oneMap.get('exp'))) < datetime.today():
-    token, exp = fetchOneMapToken()
-    ONEMAP['token'], ONEMAP['exp'] = token, exp
-    botCollection.update_one({'_id': oneMap['_id']}, {'$set': {'token': token, 'exp': exp}} )
-  else:
-    ONEMAP['token'] = oneMap.get('token')
-    ONEMAP['exp'] = oneMap.get('exp')
- 
-  myTransport = botCollection.find_one({'name': 'myTransport'})
-  if not myTransport or not myTransport.get('accountKey'):
-    logger.error("Setup error: No myTransport information in db")
-    return False
-  MY_TRANSPORT_ACCESS_KEY = myTransport.get('accountKey')
+  ONEMAP['token'] = oneMap.get('token')
+  ONEMAP['exp'] = oneMap.get('exp')
+  refreshOneMapToken()
   
   logger.info("Setup: Retrieved information from db")
 
   return True
-  
+
 
 # ====== RUN THE BOT ======
 def main():
