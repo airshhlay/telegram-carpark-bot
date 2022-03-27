@@ -333,7 +333,7 @@ class Pagination:
     if carparkInfo.get('remarks') and carparkInfo.get('remarks') != "":
       remarksMsg = REMARKS_HEADER.format(remarks=carparkInfo.get('remarks'))
       
-    return "\n".join([carparkMsg.strip(), availabilityMsg.strip(), ratesMsg.strip(), remarksMsg.strip()])
+    return "\n\n".join([carparkMsg.strip(), availabilityMsg.strip(), ratesMsg.strip(), remarksMsg.strip()])
     
 # ====== Telegram Markup Keyboards ======
 # keyboard buttons
