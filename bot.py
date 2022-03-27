@@ -69,7 +69,6 @@ ERROR_REQUEST_TIMEOUT = "Unable to contact my sources at the moment - please wai
 CARPARK_FORMAT = """<b>{name}</b>
 {parkingType}
 \U0001F6E3 Distance away: {distance}m
-
 """
 
 AVAILABILITY_HEADER = """<b>--- Parking \U0001F697 ---</b>
@@ -78,7 +77,6 @@ AVAILABILITY_HEADER = """<b>--- Parking \U0001F697 ---</b>
 AVAILABILITY_FORMAT ="""\U0001F538 Lot type: {lotType}
 Total lots: {totalLots}
 <b>Available: {availableLots}</b>
-
 """
 
 RATES_HEADER = """<b>--- Rates \U0001F4B3 ---</b>
@@ -86,7 +84,6 @@ RATES_HEADER = """<b>--- Rates \U0001F4B3 ---</b>
 """
 RATES_FORMAT = """<b>\U0001F539 {key}:</b>
 {value}
-
 """
 
 REMARKS_HEADER = """<b>--- Remarks \U0001F4DD ---</b>
@@ -298,7 +295,15 @@ class Pagination:
         data = self.availabilities[carparkInfo['car_park_no']]
         availabilities = ""
         for item in data:
-          availabilities += AVAILABILITY_FORMAT.format(lotType=item['lot_type'],totalLots=item['total_lots'], availableLots=item['lots_available'])
+          lotType = item.get('lot_type')
+          if lotType == 'C':
+            lotType = "Car"
+          elif lotType == 'H':
+            lotType = 'Heavy Vehicle'
+          elif lotType == 'M':
+            lotType = 'Motorcycle'
+          availabilities += AVAILABILITY_FORMAT.format(lotType=lotType,totalLots=item['total_lots'], availableLots=item['lots_available'])
+          availabilities += "\n"
         availabilityMsg = AVAILABILITY_HEADER.format(availabilities=availabilities)
         
     # shopping mall parking
@@ -329,7 +334,7 @@ class Pagination:
     if carparkInfo.get('remarks') and carparkInfo.get('remarks') != "":
       remarksMsg = REMARKS_HEADER.format(remarks=carparkInfo.get('remarks'))
       
-    return carparkMsg + availabilityMsg + ratesMsg +  remarksMsg
+    return "\n".join([carparkMsg.strip(), availabilityMsg.strip(), ratesMsg.strip(), remarksMsg.strip()])
     
 # ====== Telegram Markup Keyboards ======
 # keyboard buttons
