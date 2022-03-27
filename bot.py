@@ -74,7 +74,7 @@ CARPARK_FORMAT = """<b>{name}</b>
 AVAILABILITY_HEADER = """<b>--- Parking \U0001F697 ---</b>
 {availabilities}
 """
-AVAILABILITY_FORMAT ="""\U0001F538 Lot type: {lotType}
+AVAILABILITY_FORMAT ="""\U0001F538 Type: {lotType}
 Total lots: {totalLots}
 <b>Available: {availableLots}</b>
 """
@@ -120,7 +120,6 @@ def refreshOneMapToken():
     botCollection.update_one({'_id': oneMap['_id']}, {'$set': {'token': token, 'exp': exp}} )
 
 def fetchOneMapToken() -> Tuple[str, str]:
-  refreshOneMapToken()
   body = {'email': ONEMAP['email'], 'password': ONEMAP['password']}
   r = doPostRequest(ONEMAP_API['GET_TOKEN'], body)
   if r.get('access_token') and r.get('expiry_timestamp'):
